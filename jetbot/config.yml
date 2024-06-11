@@ -1,0 +1,9 @@
+model:
+  path: './minimal.onnx'
+
+robot:
+  max_speed: 0.22
+  max_steering: 0.5
+  differential:
+    left: 1.0
+    right: 0.9
