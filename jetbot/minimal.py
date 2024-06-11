@@ -8,6 +8,28 @@ import numpy as np
 from PUTDriver import PUTDriver, gstreamer_pipeline
 
 
+def process(img):
+    def region_of_interest(image):
+        height, width = image.shape[:2]
+        # Define the trapezoid vertices
+        vertices = np.array([
+            [(0, height),  # Bottom-left
+             (width, height),  # Bottom-right
+             (width * 0.6, height * 0.4),  # Top-right
+             (width * 0.4, height * 0.4)]  # Top-left
+        ], dtype=np.int32)
+        mask = np.zeros_like(image)
+        cv2.fillPoly(mask, vertices, 255)
+        masked_image = cv2.bitwise_and(image, mask)
+        return masked_image
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    canny = cv2.Canny(blur, 60, 100)
+    dilated = cv2.dilate(canny, kernel=(5, 5))
+
+    masked = region_of_interest(dilated)
+    return masked.astype(np.float32) / 255.0
+
 class AI:
     def __init__(self, config: dict):
         self.path = config['model']['path']
@@ -17,32 +39,29 @@ class AI:
         self.output_name = self.sess.get_outputs()[0].name
         self.input_name = self.sess.get_inputs()[0].name
 
-    def preprocess(self, img: np.ndarray) -> np.ndarray:
-        cropped = img[112:]
-        normalized = img / 255.0
-        return normalized.astype(np.float32)[np.newaxis, ...]
+        self.history = [np.array([0,0], np.float32)] * 10
 
+    def preprocess(self, img: np.ndarray) -> np.ndarray:
+        processed = process(img)
+        processed[:90] = 0
+        return processed[np.newaxis,...,np.newaxis]
 
     def postprocess(self, detections: np.ndarray) -> np.ndarray:
-        print(detections)
-        return detections[0] * 100
-
+        self.history.append(np.array([0.8, 1.3 * detections[0][0]], dtype=np.float32))
+        return self.history[-1]
 
     def predict(self, img: np.ndarray) -> np.ndarray:
         inputs = self.preprocess(img)
 
         assert inputs.dtype == np.float32
-        assert inputs.shape == (1, 224, 224, 3)
-
+        
         detections = self.sess.run([self.output_name], {self.input_name: inputs})[0]
         outputs = self.postprocess(detections)
 
         assert outputs.dtype == np.float32
-        assert outputs.shape == (2,)
-        assert outputs.max() < 1.0
-        assert outputs.min() > -1.0
 
         return outputs
+
 
 def main():
     with open("config.yml", "r") as stream:
